@@ -352,6 +352,7 @@ func (k *Keeper) ApplyMessageWithConfig(ctx sdk.Context, msg core.Message, trace
 
 	stateDB := statedb.New(ctx, k, txConfig)
 	evm := k.NewEVM(ctx, msg, cfg, tracer, stateDB)
+	evm.SetHaechiContext(ctx)
 
 	sender := vm.AccountRef(msg.From())
 	contractCreation := msg.To() == nil
