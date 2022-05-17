@@ -1,6 +1,7 @@
 package keeper
 
 import (
+	"github.com/cosmos/cosmos-sdk/store"
 	"math"
 	"math/big"
 
@@ -347,6 +348,10 @@ func (k *Keeper) ApplyMessageWithConfig(ctx sdk.Context, msg core.Message, trace
 		return nil, sdkerrors.Wrap(types.ErrCreateDisabled, "failed to create new contract")
 	} else if !cfg.Params.EnableCall && msg.To() != nil {
 		return nil, sdkerrors.Wrap(types.ErrCallDisabled, "failed to call contract")
+	}
+
+	if _, ok := ctx.MultiStore().(store.CacheMultiStore); ok && commit {
+		return nil, sdkerrors.Wrap(types.ErrInvalidContext, "when a commit request comes, it should be in the read context, not the cache.")
 	}
 
 	if !commit {
