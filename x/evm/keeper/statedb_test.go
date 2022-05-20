@@ -792,3 +792,219 @@ func (suite *KeeperTestSuite) _TestForEachStorage() {
 		storage = types.Storage{}
 	}
 }
+
+func (suite *KeeperTestSuite) TestContext() {
+	// setup
+	suite.SetupTest()
+
+	amounts := []int64{
+		10000000000,
+		20000000000,
+		30000000000,
+	}
+
+	testCase := []struct {
+		name       string
+		initAmount int64
+		operation  func(stateDB *statedb.StateDB, from, to common.Address, amounts []int64)
+		/*
+			0: eth from before operation - eth from after operation
+			1: eth to after operation - eth to before operation
+			2: cosmos from before operation - cosmos from after operation
+			3: cosmos to after operation - cosmos to before operation
+		*/
+		expectedAmounts [4]int64
+		test            func() error
+	}{
+		{
+			name:       "transfer and flush",
+			initAmount: amounts[0],
+			operation: func(stateDB *statedb.StateDB, from, to common.Address, amounts []int64) {
+				EthTransfer(stateDB, from, to, big.NewInt(amounts[0]))
+				stateDB.Flush()
+			},
+			expectedAmounts: [4]int64{amounts[0], amounts[0], amounts[0], amounts[0]},
+		},
+		{
+			name:       "transfer and do not flush",
+			initAmount: amounts[0],
+			operation: func(stateDB *statedb.StateDB, from, to common.Address, amounts []int64) {
+				EthTransfer(stateDB, from, to, big.NewInt(amounts[0]))
+			},
+			expectedAmounts: [4]int64{amounts[0], amounts[0], 0, 0},
+		},
+		{
+			name:       "flush and revert",
+			initAmount: amounts[0],
+			operation: func(stateDB *statedb.StateDB, from, to common.Address, amounts []int64) {
+				snapshot := stateDB.Snapshot()
+				EthTransfer(stateDB, from, to, big.NewInt(amounts[0]))
+				stateDB.Flush()
+				stateDB.RevertToSnapshot(snapshot)
+			},
+			expectedAmounts: [4]int64{0, 0, 0, 0},
+		},
+		{
+			name:       "revert and flush",
+			initAmount: amounts[0] + amounts[1],
+			operation: func(stateDB *statedb.StateDB, from, to common.Address, amounts []int64) {
+				EthTransfer(stateDB, from, to, big.NewInt(amounts[0]))
+
+				snapshot1 := stateDB.Snapshot()
+				EthTransfer(stateDB, from, to, big.NewInt(amounts[1]))
+				stateDB.Flush()
+
+				stateDB.RevertToSnapshot(snapshot1)
+				stateDB.Flush()
+			},
+			expectedAmounts: [4]int64{
+				amounts[0],
+				amounts[0],
+				amounts[0],
+				amounts[0],
+			},
+		},
+		{
+			name:       "revert after multiple snapshot",
+			initAmount: amounts[0] + amounts[1] + amounts[2],
+			operation: func(stateDB *statedb.StateDB, from, to common.Address, amounts []int64) {
+				stateDB.Snapshot()
+				EthTransfer(stateDB, from, to, big.NewInt(amounts[0]))
+				stateDB.Flush()
+
+				EthTransfer(stateDB, from, to, big.NewInt(amounts[1]))
+				stateDB.Flush()
+
+				snapshot2 := stateDB.Snapshot()
+				EthTransfer(stateDB, from, to, big.NewInt(amounts[2]))
+				stateDB.Flush()
+				stateDB.RevertToSnapshot(snapshot2)
+			},
+			expectedAmounts: [4]int64{
+				amounts[0] + amounts[1],
+				amounts[0] + amounts[1],
+				amounts[0] + amounts[1],
+				amounts[0] + amounts[1],
+			},
+		},
+		{
+			name:       "multiple revert",
+			initAmount: amounts[0] + amounts[1] + amounts[2],
+			operation: func(stateDB *statedb.StateDB, from, to common.Address, amounts []int64) {
+				snapshot1 := stateDB.Snapshot()
+				EthTransfer(stateDB, from, to, big.NewInt(amounts[0]))
+				stateDB.Flush()
+
+				EthTransfer(stateDB, from, to, big.NewInt(amounts[1]))
+				stateDB.Flush()
+
+				snapshot2 := stateDB.Snapshot()
+				EthTransfer(stateDB, from, to, big.NewInt(amounts[2]))
+				stateDB.Flush()
+				stateDB.RevertToSnapshot(snapshot2)
+				stateDB.RevertToSnapshot(snapshot1)
+			},
+			expectedAmounts: [4]int64{0, 0, 0, 0},
+		},
+		{
+			name:       "commit",
+			initAmount: amounts[0],
+			operation: func(stateDB *statedb.StateDB, from, to common.Address, amounts []int64) {
+				EthTransfer(stateDB, from, to, big.NewInt(amounts[0]))
+				stateDB.Commit()
+			},
+			expectedAmounts: [4]int64{
+				amounts[0],
+				amounts[0],
+				amounts[0],
+				amounts[0],
+			},
+		},
+		{
+			name:       "multiple snapshot and commit",
+			initAmount: amounts[0] + amounts[1] + amounts[2],
+			operation: func(stateDB *statedb.StateDB, from, to common.Address, amounts []int64) {
+				stateDB.Snapshot()
+				EthTransfer(stateDB, from, to, big.NewInt(amounts[0]))
+
+				stateDB.Snapshot()
+				EthTransfer(stateDB, from, to, big.NewInt(amounts[1]))
+
+				stateDB.Snapshot()
+				EthTransfer(stateDB, from, to, big.NewInt(amounts[2]))
+
+				stateDB.Commit()
+			},
+			expectedAmounts: [4]int64{
+				amounts[0] + amounts[1] + amounts[2],
+				amounts[0] + amounts[1] + amounts[2],
+				amounts[0] + amounts[1] + amounts[2],
+				amounts[0] + amounts[1] + amounts[2],
+			},
+		},
+		{
+			name:       "revert and commit",
+			initAmount: amounts[0] + amounts[1] + amounts[2],
+			operation: func(stateDB *statedb.StateDB, from, to common.Address, amounts []int64) {
+				stateDB.Snapshot()
+				EthTransfer(stateDB, from, to, big.NewInt(amounts[0]))
+
+				stateDB.Snapshot()
+				EthTransfer(stateDB, from, to, big.NewInt(amounts[1]))
+
+				snapshot3 := stateDB.Snapshot()
+				EthTransfer(stateDB, from, to, big.NewInt(amounts[2]))
+				stateDB.RevertToSnapshot(snapshot3)
+
+				stateDB.Commit()
+			},
+			expectedAmounts: [4]int64{
+				amounts[0] + amounts[1],
+				amounts[0] + amounts[1],
+				amounts[0] + amounts[1],
+				amounts[0] + amounts[1],
+			},
+		},
+	}
+
+	for _, tc := range testCase {
+		suite.Run(tc.name, func() {
+			suite.SetupTest()
+			ethAccount1 := common.HexToAddress("0x5E3CaA56392C6a8b3CDbdA26472CCAF58F09B836")
+			cosmosAccount1 := sdk.AccAddress(ethAccount1.Bytes())
+
+			ethAccount2 := common.HexToAddress("0xB87452F4693C45C45009fc6142c746Ba373a5022")
+			cosmosAccount2 := sdk.AccAddress(ethAccount2.Bytes())
+
+			denom := suite.app.EvmKeeper.GetParams(suite.ctx).EvmDenom
+			coins := sdk.NewCoins(sdk.NewCoin(denom, sdk.NewInt(tc.initAmount)))
+			suite.FaucetCoins(cosmosAccount1, coins)
+
+			stateDB := suite.StateDB()
+			ctx := stateDB.GetLatestCtx().(sdk.Context)
+
+			account1EthBalanceBefore := stateDB.GetBalance(ethAccount1)
+			account1CosmosBalanceBefore := suite.app.BankKeeper.GetBalance(ctx, cosmosAccount1, denom)
+			account2EthBalanceBefore := stateDB.GetBalance(ethAccount2)
+			account2CosmosBalanceBefore := suite.app.BankKeeper.GetBalance(ctx, cosmosAccount2, denom)
+
+			tc.operation(stateDB, ethAccount1, ethAccount2, amounts)
+
+			ctx = stateDB.GetLatestCtx().(sdk.Context)
+			account1EthBalanceAfter := stateDB.GetBalance(ethAccount1)
+			account1CosmosBalanceAfter := suite.app.BankKeeper.GetBalance(ctx, cosmosAccount1, denom)
+			account2EthBalanceAfter := stateDB.GetBalance(ethAccount2)
+			account2CosmosBalanceAfter := suite.app.BankKeeper.GetBalance(ctx, cosmosAccount2, denom)
+
+			suite.Require().Equal(new(big.Int).Sub(account1EthBalanceBefore, account1EthBalanceAfter).Int64(), tc.expectedAmounts[0])
+			suite.Require().Equal(new(big.Int).Sub(account2EthBalanceAfter, account2EthBalanceBefore).Int64(), tc.expectedAmounts[1])
+			suite.Require().Equal(account1CosmosBalanceBefore.Amount.Sub(account1CosmosBalanceAfter.Amount).Int64(), tc.expectedAmounts[2])
+			suite.Require().Equal(account2CosmosBalanceAfter.Amount.Sub(account2CosmosBalanceBefore.Amount).Int64(), tc.expectedAmounts[3])
+		})
+	}
+}
+
+func EthTransfer(stateDB *statedb.StateDB, sender, recipient common.Address, amount *big.Int) {
+	stateDB.SubBalance(sender, amount)
+	stateDB.AddBalance(recipient, amount)
+}
