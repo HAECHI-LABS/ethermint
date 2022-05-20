@@ -30,7 +30,6 @@ require (
 	github.com/stretchr/testify v1.7.0
 	github.com/tendermint/tendermint v0.34.14
 	github.com/tendermint/tm-db v0.6.7
-	github.com/tharsis/ethermint v0.11.0
 	github.com/tyler-smith/go-bip39 v1.1.0
 	google.golang.org/genproto v0.0.0-20220211171837-173942840c17
 	google.golang.org/grpc v1.44.0
@@ -152,7 +151,7 @@ require (
 
 replace (
 	github.com/99designs/keyring => github.com/cosmos/keyring v1.1.7-0.20210622111912-ef00f8ac3d76
-	github.com/ethereum/go-ethereum => github.com/haechi-labs/go-ethereum v1.8.18-0.20220510013116-d79fed0a03ef
+	github.com/ethereum/go-ethereum => github.com/haechi-labs/go-ethereum v1.8.18-0.20220520142827-93bbc56bde38
 	github.com/gogo/protobuf => github.com/regen-network/protobuf v1.3.3-alpha.regen.1
 	google.golang.org/grpc => google.golang.org/grpc v1.33.2
 )
