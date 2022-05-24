@@ -440,3 +440,126 @@ func (suite *KeeperTestSuite) TestDeductTxCostsFromUserBalance() {
 	}
 	suite.enableFeemarket = false // reset flag
 }
+
+func (suite *KeeperTestSuite) TestTxCosts() {
+	zeroInt := sdk.ZeroInt()
+	oneInt := sdk.NewInt(1)
+
+	testCases := []struct {
+		name            string
+		gasLimit        uint64
+		gasPrice        *sdk.Int
+		gasFeeCap       *big.Int
+		gasTipCap       *big.Int
+		accessList      *ethtypes.AccessList
+		expectPass      bool
+		enableFeemarket bool
+		isCheckTx bool
+	}{
+		{
+			name:       "Gas limit is low, check tx mode",
+			gasLimit:   1,
+			gasPrice:   &oneInt,
+			accessList: &ethtypes.AccessList{},
+			expectPass: false,
+			isCheckTx:  true,
+		},
+		{
+			name:       "Not apply base fee",
+			gasLimit:   100,
+			gasPrice:   &oneInt,
+			accessList: &ethtypes.AccessList{},
+			expectPass: true,
+			isCheckTx:  false,
+		},
+		//  apply base fee with enableFeemarket enabled
+		{
+			name:            "Invalid gasFeeCap w/ enableFeemarket",
+			gasLimit:        10,
+			gasFeeCap:       big.NewInt(1),
+			gasTipCap:       big.NewInt(1),
+			accessList:      &ethtypes.AccessList{},
+			expectPass:      false,
+			enableFeemarket: true,
+			isCheckTx:  false,
+		},
+		{
+			name:            "Valid gasFeeCap w/ enableFeemarket",
+			gasLimit:        10,
+			gasFeeCap:       big.NewInt(ethparams.InitialBaseFee),
+			gasTipCap:       big.NewInt(1),
+			accessList:      &ethtypes.AccessList{},
+			expectPass:      true,
+			enableFeemarket: true,
+			isCheckTx:  false,
+		},
+	}
+
+	for i, tc := range testCases {
+		suite.Run(tc.name, func() {
+			suite.enableFeemarket = tc.enableFeemarket
+			suite.SetupTest()
+
+			var amount, gasPrice, gasFeeCap, gasTipCap *big.Int
+
+			if suite.enableFeemarket {
+				// dynamic fee tx
+				if tc.gasFeeCap != nil {
+					gasFeeCap = tc.gasFeeCap
+				}
+				if tc.gasTipCap == nil {
+					gasTipCap = oneInt.BigInt()
+				} else {
+					gasTipCap = tc.gasTipCap
+				}
+			} else {
+				// access list tx
+				if tc.gasPrice != nil {
+					gasPrice = tc.gasPrice.BigInt()
+				}
+			}
+
+			suite.ctx = suite.ctx.WithIsCheckTx(tc.isCheckTx)
+
+			tx := evmtypes.NewTx(zeroInt.BigInt(), 1, &suite.address, amount, tc.gasLimit, gasPrice, gasFeeCap, gasTipCap, nil, tc.accessList)
+			tx.From = suite.address.String()
+
+			txData, _ := evmtypes.UnpackTxData(tx.Data)
+
+			fees, err := suite.app.EvmKeeper.TxCosts(
+				suite.ctx,
+				txData,
+				evmtypes.DefaultEVMDenom,
+				false,
+				false,
+				suite.enableFeemarket, // london
+			)
+
+			if tc.expectPass {
+				suite.Require().NoError(err, "valid test %d failed", i)
+				if tc.enableFeemarket {
+					baseFee := suite.app.FeeMarketKeeper.GetBaseFee(suite.ctx)
+					suite.Require().Equal(
+						fees,
+						sdk.NewCoins(
+							sdk.NewCoin(evmtypes.DefaultEVMDenom, sdk.NewIntFromBigInt(txData.EffectiveFee(baseFee))),
+						),
+						"valid test %d failed, fee value is wrong ", i,
+					)
+				} else {
+					suite.Require().Equal(
+						fees,
+						sdk.NewCoins(
+							sdk.NewCoin(evmtypes.DefaultEVMDenom, tc.gasPrice.Mul(sdk.NewIntFromUint64(tc.gasLimit))),
+						),
+						"valid test %d failed, fee value is wrong ", i,
+					)
+				}
+			} else {
+				suite.Require().Error(err, "invalid test %d passed", i)
+				suite.Require().Nil(fees, "invalid test %d passed. fees value must be nil", i)
+			}
+		})
+	}
+	suite.enableFeemarket = false // reset flag
+}

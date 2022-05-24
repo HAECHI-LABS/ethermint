@@ -13,21 +13,14 @@ import (
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 )
 
-// DeductTxCostsFromUserBalance it calculates the tx costs and deducts the fees
-func (k Keeper) DeductTxCostsFromUserBalance(
+// TxCosts it calculates the tx costs
+func (k Keeper) TxCosts(
 	ctx sdk.Context,
-	msgEthTx evmtypes.MsgEthereumTx,
 	txData evmtypes.TxData,
 	denom string,
 	homestead, istanbul, london bool,
 ) (sdk.Coins, error) {
 	isContractCreation := txData.GetTo() == nil
-
-	// fetch sender account from signature
-	signerAcc, err := authante.GetSignerAcc(ctx, k.accountKeeper, msgEthTx.GetFrom())
-	if err != nil {
-		return nil, sdkerrors.Wrapf(err, "account not found for sender %s", msgEthTx.From)
-	}
 
 	gasLimit := txData.GetGas()
 
@@ -71,7 +64,27 @@ func (k Keeper) DeductTxCostsFromUserBalance(
 		return sdk.NewCoins(), nil
 	}
 
-	fees := sdk.Coins{sdk.NewCoin(denom, sdk.NewIntFromBigInt(feeAmt))}
+	return sdk.Coins{sdk.NewCoin(denom, sdk.NewIntFromBigInt(feeAmt))}, nil
+}
+
+// DeductTxCostsFromUserBalance it calculates the tx costs and deducts the fees
+func (k Keeper) DeductTxCostsFromUserBalance(
+	ctx sdk.Context,
+	msgEthTx evmtypes.MsgEthereumTx,
+	txData evmtypes.TxData,
+	denom string,
+	homestead, istanbul, london bool,
+) (sdk.Coins, error) {
+	// fetch sender account from signature
+	signerAcc, err := authante.GetSignerAcc(ctx, k.accountKeeper, msgEthTx.GetFrom())
+	if err != nil {
+		return nil, sdkerrors.Wrapf(err, "account not found for sender %s", msgEthTx.From)
+	}
+
+	fees, err := k.TxCosts(ctx, txData, denom, homestead, istanbul, london)
+	if err != nil {
+		return nil, err
+	}
 
 	// deduct the full gas cost from the user balance
 	if err := authante.DeductFees(k.bankKeeper, ctx, signerAcc, fees); err != nil {
