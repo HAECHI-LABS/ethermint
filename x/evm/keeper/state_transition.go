@@ -350,14 +350,16 @@ func (k *Keeper) ApplyMessageWithConfig(ctx sdk.Context, msg core.Message, trace
 		return nil, sdkerrors.Wrap(types.ErrCallDisabled, "failed to call contract")
 	}
 
-	stateDB := statedb.New(ctx, k, txConfig)
-	evm := k.NewEVM(ctx, msg, cfg, tracer, stateDB)
+	cacheCtx, write := ctx.CacheContext()
+
+	stateDB := statedb.New(cacheCtx, k, txConfig)
+	evm := k.NewEVM(cacheCtx, msg, cfg, tracer, stateDB)
 
 	sender := vm.AccountRef(msg.From())
 	contractCreation := msg.To() == nil
 	isLondon := cfg.ChainConfig.IsLondon(evm.Context.BlockNumber)
 
-	intrinsicGas, err := k.GetEthIntrinsicGas(ctx, msg, cfg.ChainConfig, contractCreation)
+	intrinsicGas, err := k.GetEthIntrinsicGas(cacheCtx, msg, cfg.ChainConfig, contractCreation)
 	if err != nil {
 		// should have already been checked on Ante Handler
 		return nil, sdkerrors.Wrap(err, "intrinsic gas failed")
@@ -371,7 +373,7 @@ func (k *Keeper) ApplyMessageWithConfig(ctx sdk.Context, msg core.Message, trace
 
 	// access list preparation is moved from ante handler to here, because it's needed when `ApplyMessage` is called
 	// under contexts where ante handlers are not run, for example `eth_call` and `eth_estimateGas`.
-	if rules := cfg.ChainConfig.Rules(big.NewInt(ctx.BlockHeight()), cfg.ChainConfig.MergeForkBlock != nil); rules.IsBerlin {
+	if rules := cfg.ChainConfig.Rules(big.NewInt(cacheCtx.BlockHeight()), cfg.ChainConfig.MergeForkBlock != nil); rules.IsBerlin {
 		stateDB.PrepareAccessList(msg.From(), msg.To(), vm.ActivePrecompiles(rules), msg.AccessList())
 	}
 
@@ -415,6 +417,7 @@ func (k *Keeper) ApplyMessageWithConfig(ctx sdk.Context, msg core.Message, trace
 		if err := stateDB.Commit(); err != nil {
 			return nil, sdkerrors.Wrap(err, "failed to commit stateDB")
 		}
+		write()
 	}
 
 	return &types.MsgEthereumTxResponse{

@@ -412,6 +412,11 @@ func (suite *KeeperTestSuite) TestBaseFee() {
 	suite.enableLondonHF = true
 }
 
+func (suite *KeeperTestSuite) FaucetCoins(to sdk.AccAddress, coins sdk.Coins) {
+	suite.app.BankKeeper.MintCoins(suite.ctx, "mint", coins)
+	suite.app.BankKeeper.SendCoinsFromModuleToAccount(suite.ctx, "mint", to, coins)
+}
+
 func TestKeeperTestSuite(t *testing.T) {
 	suite.Run(t, &KeeperTestSuite{
 		enableFeemarket: false,

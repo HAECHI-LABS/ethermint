@@ -21,6 +21,11 @@ type revision struct {
 	journalIndex int
 }
 
+type cacheCtx struct {
+	ctx   sdk.Context
+	write func()
+}
+
 var _ vm.StateDB = &StateDB{}
 
 // StateDB structs within the ethereum protocol are used to store anything
@@ -29,8 +34,9 @@ var _ vm.StateDB = &StateDB{}
 // * Contracts
 // * Accounts
 type StateDB struct {
-	keeper Keeper
-	ctx    sdk.Context
+	keeper    Keeper
+	ctx       sdk.Context
+	cacheCtxs []*cacheCtx // It must be the same size as validRevisions.
 
 	// Journal of state modifications. This is the backbone of
 	// Snapshot and RevertToSnapshot.
@@ -414,7 +420,25 @@ func (s *StateDB) Snapshot() int {
 	id := s.nextRevisionID
 	s.nextRevisionID++
 	s.validRevisions = append(s.validRevisions, revision{id, s.journal.length()})
+	s.cacheCtxs = append(s.cacheCtxs, s.newCacheCtx())
 	return id
+}
+
+func (s *StateDB) GetLatestCtx() interface{} {
+	return s.getLatestCtx()
+}
+
+func (s *StateDB) getLatestCtx() sdk.Context {
+	if len(s.cacheCtxs) == 0 {
+		return s.ctx
+	}
+
+	return s.cacheCtxs[len(s.cacheCtxs)-1].ctx
+}
+
+func (s *StateDB) Flush() error {
+	ctx := s.getLatestCtx()
+	return s.commit(ctx)
 }
 
 // RevertToSnapshot reverts all state changes made since the given revision.
@@ -431,22 +455,35 @@ func (s *StateDB) RevertToSnapshot(revid int) {
 	// Replay the journal to undo changes and remove invalidated snapshots
 	s.journal.revert(s, snapshot)
 	s.validRevisions = s.validRevisions[:idx]
+	s.cacheCtxs = s.cacheCtxs[:idx]
 }
 
 // Commit writes the dirty states to keeper
 // the StateDB object should be discarded after committed.
 func (s *StateDB) Commit() error {
+	if s.nextRevisionID == 0 {
+		return s.commit(s.ctx)
+	}
+
+	for idx := len(s.cacheCtxs) - 1; idx >= 0; idx-- {
+		s.cacheCtxs[idx].write()
+	}
+
+	return s.commit(s.ctx)
+}
+
+func (s *StateDB) commit(ctx sdk.Context) error {
 	for _, addr := range s.journal.sortedDirties() {
 		obj := s.stateObjects[addr]
 		if obj.suicided {
-			if err := s.keeper.DeleteAccount(s.ctx, obj.Address()); err != nil {
+			if err := s.keeper.DeleteAccount(ctx, obj.Address()); err != nil {
 				return sdkerrors.Wrap(err, "failed to delete account")
 			}
 		} else {
 			if obj.code != nil && obj.dirtyCode {
-				s.keeper.SetCode(s.ctx, obj.CodeHash(), obj.code)
+				s.keeper.SetCode(ctx, obj.CodeHash(), obj.code)
 			}
-			if err := s.keeper.SetAccount(s.ctx, obj.Address(), obj.account); err != nil {
+			if err := s.keeper.SetAccount(ctx, obj.Address(), obj.account); err != nil {
 				return sdkerrors.Wrap(err, "failed to set account")
 			}
 			for _, key := range obj.dirtyStorage.SortedKeys() {
@@ -455,9 +492,25 @@ func (s *StateDB) Commit() error {
 				if value == obj.originStorage[key] {
 					continue
 				}
-				s.keeper.SetState(s.ctx, obj.Address(), key, value.Bytes())
+				s.keeper.SetState(ctx, obj.Address(), key, value.Bytes())
 			}
 		}
 	}
 	return nil
+}
+
+func (s *StateDB) newCacheCtx() *cacheCtx {
+	if len(s.cacheCtxs) == 0 {
+		ctx, write := s.ctx.CacheContext()
+		return &cacheCtx{
+			ctx:   ctx,
+			write: write,
+		}
+	}
+
+	ctx, write := s.cacheCtxs[len(s.cacheCtxs)-1].ctx.CacheContext()
+	return &cacheCtx{
+		ctx:   ctx,
+		write: write,
+	}
 }
