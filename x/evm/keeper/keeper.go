@@ -53,7 +53,12 @@ type Keeper struct {
 
 	// EVM Hooks for tx post-processing
 	hooks types.EvmHooks
+
+	// function which defines how to refund leftover gas
+	refundGas RefundGas
 }
+
+type RefundGas func(ctx sdk.Context, msg core.Message, leftoverGas uint64, denom string) error
 
 // NewKeeper generates new evm module keeper
 func NewKeeper(
@@ -74,7 +79,7 @@ func NewKeeper(
 	}
 
 	// NOTE: we pass in the parameter space to the CommitStateDB in order to use custom denominations for the EVM operations
-	return &Keeper{
+	k := &Keeper{
 		cdc:             cdc,
 		paramSpace:      paramSpace,
 		accountKeeper:   ak,
@@ -85,6 +90,24 @@ func NewKeeper(
 		transientKey:    transientKey,
 		tracer:          tracer,
 	}
+	k.refundGas = k.basicRefundGas
+	return k
+}
+
+// NewKeeperRefundGas create new keeper with custom refund gas method
+func NewKeeperWithRefundGas(
+	cdc codec.BinaryCodec,
+	storeKey, transientKey sdk.StoreKey, paramSpace paramtypes.Subspace,
+	ak types.AccountKeeper, bankKeeper types.BankKeeper, sk types.StakingKeeper,
+	fmk types.FeeMarketKeeper,
+	tracer string,
+	refundGas RefundGas,
+) *Keeper {
+	k := NewKeeper(cdc, storeKey, transientKey, paramSpace, ak, bankKeeper, sk, fmk, tracer)
+	if refundGas != nil {
+		k.refundGas = refundGas
+	}
+	return k
 }
 
 // Logger returns a module-specific logger.
