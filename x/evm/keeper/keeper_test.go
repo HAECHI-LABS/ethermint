@@ -131,7 +131,7 @@ func (suite *KeeperTestSuite) DoSetupTest(t require.TestingT) {
 			abci.RequestInitChain{
 				ChainId:         "ethermint_9000-1",
 				Validators:      []abci.ValidatorUpdate{},
-				ConsensusParams: simapp.DefaultConsensusParams,
+				ConsensusParams: app.DefaultConsensusParams,
 				AppStateBytes:   stateBytes,
 			},
 		)
@@ -404,7 +404,7 @@ func (suite *KeeperTestSuite) TestBaseFee() {
 			suite.app.EvmKeeper.BeginBlock(suite.ctx, abci.RequestBeginBlock{})
 			params := suite.app.EvmKeeper.GetParams(suite.ctx)
 			ethCfg := params.ChainConfig.EthereumConfig(suite.app.EvmKeeper.ChainID())
-			baseFee := suite.app.EvmKeeper.BaseFee(suite.ctx, ethCfg)
+			baseFee := suite.app.EvmKeeper.GetBaseFee(suite.ctx, ethCfg)
 			suite.Require().Equal(tc.expectBaseFee, baseFee)
 		})
 	}
